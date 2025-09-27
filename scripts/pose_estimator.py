@@ -14,6 +14,7 @@ threshold_keypoint = 0.6
 class PoseEstimator:
     def __init__(self):
         self.model = YOLO('yolov8n-pose.pt')  # Replace '/path/to/' with the actual path to the model file
+        self.__curent_frame = None
 
     def estimate_person(self, frame):
         # Perform pose estimation

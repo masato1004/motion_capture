@@ -7,7 +7,8 @@ class CameraController:
         self.camera_index = camera_index
         self.cap = None
         self.is_capturing = False
-        self.frame_history = []
+        self.__frame_history = []
+        self.__current_frame = None
         
     def start_capture(self):
         if self.is_capturing:
@@ -20,12 +21,13 @@ class CameraController:
             
     def capture(self):        
         ret, frame = self.cap.read()
+        self.__current_frame = frame
         return ret, frame
     
     def add_frame_to_history(self, frame, frequency=15):
-        if len(self.frame_history) >= frequency*4:
-            self.frame_history = self.frame_history[-frequency*4:]
-        self.frame_history.append(frame)
+        if len(self.__frame_history) >= frequency*4:
+            self.__frame_history = self.__frame_history[-frequency*4:]
+        self.__frame_history.append(frame)
 
     def stop_capture(self):
         if not self.is_capturing:
@@ -35,6 +37,14 @@ class CameraController:
         # Release everything when done
         self.cap.release()
         # out.release()
+    
+    @property
+    def current_frame(self):
+        return self.__current_frame
+    
+    @property
+    def frame_history(self):
+        return self.__frame_history
 
 if __name__ == "__main__":
     controller = CameraController()
