@@ -1,0 +1,12 @@
+# directories
+/moc_env
+
+# files
+*.png
+*.jpg
+*.HEIC
+*.mov
+*.mp4
+*.zip
+*.tar.gz
+*.pt
