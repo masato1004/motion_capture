@@ -3,31 +3,34 @@ import numpy as np
 from time import time
 
 class CameraController:
-    def __init__(self, camera_index=0):
-        self.camera_index = camera_index
+    def __init__(self, streaming_subject=0):
+        self.streaming_subject = streaming_subject
         self.cap = None
         self.is_capturing = False
-        self.__frame_history = []
-        self.__current_frame = None
+        self._frame_history = []
+        self._current_frame = np.array([])
         
     def start_capture(self):
         if self.is_capturing:
             print("Capture is already running.")
             return
-        self.cap = cv2.VideoCapture(self.camera_index)
+        self.cap = cv2.VideoCapture(self.streaming_subject)
         if not self.cap.isOpened():
             raise ValueError("Could not open the camera.")
         self.is_capturing = True
             
     def capture(self):        
         ret, frame = self.cap.read()
-        self.__current_frame = frame
+        if not ret or frame is None:
+            print("Failed to capture image")
+            return ret, None
+        self._current_frame = frame.copy()
         return ret, frame
     
     def add_frame_to_history(self, frame, frequency=15):
-        if len(self.__frame_history) >= frequency*4:
-            self.__frame_history = self.__frame_history[-frequency*4:]
-        self.__frame_history.append(frame)
+        if len(self._frame_history) >= frequency*4:
+            self._frame_history = self._frame_history[-frequency*4:]
+        self._frame_history.append(frame)
 
     def stop_capture(self):
         if not self.is_capturing:
@@ -40,11 +43,11 @@ class CameraController:
     
     @property
     def current_frame(self):
-        return self.__current_frame
+        return self._current_frame
     
     @property
     def frame_history(self):
-        return self.__frame_history
+        return self._frame_history
 
 if __name__ == "__main__":
     controller = CameraController()

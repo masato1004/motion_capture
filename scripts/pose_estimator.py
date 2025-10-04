@@ -8,15 +8,49 @@ from logging import getLogger
 logger = getLogger('ultralytics')
 logger.disabled = True
 
-threshold_person = 0.7
-threshold_keypoint = 0.6
+THRESHOLD_PERSON = 0.7
+THRESHOLD_KEYPOINT = 0.6
+YOLO_VERSION = 'v8'  # 'v11' or 'v8'
 
 class PoseEstimator:
-    def __init__(self):
-        self.model = YOLO('yolov8n-pose.pt')  # Replace '/path/to/' with the actual path to the model file
-        self.__curent_frame = None
+    def __init__(self, version=YOLO_VERSION):
+        if version == 'v11':
+            self.model = YOLO('yolo11n-pose.pt')
+        elif version == 'v10':
+            self.model = YOLO('yolov10n.pt')
+        elif version == 'v9':
+            self.model = YOLO('yolov9c.pt')
+        elif version == 'v8':
+            self.model = YOLO('yolov8n-pose.pt')  # Replace '/path/to/' with the actual path to the model file
+        self._curent_frame = np.array([])
+        self._curent_annotated_frame = np.array([])
+    
+    def estimate(self, frame) -> np.ndarray:
+        if frame is None:
+            return self._curent_annotated_frame
+        
+        # Store the current frame
+        self._curent_frame = frame.copy()
+        
+        # Perform pose estimation
+        results = self.model(frame)
 
-    def estimate_person(self, frame):
+        results_0 = results[0]
+
+        # Create a copy of the frame for annotations
+        annotated_frame = results_0.plot()
+                
+        self._curent_annotated_frame = annotated_frame
+        return annotated_frame
+        
+
+    def estimate_person(self, frame) -> np.ndarray:
+        if frame is None:
+            return self._curent_annotated_frame
+        
+        # Store the current frame
+        self._curent_frame = frame.copy()
+        
         # Perform pose estimation
         results = self.model(frame)
 
@@ -25,67 +59,75 @@ class PoseEstimator:
         # Create a copy of the frame for annotations
         person_annotated_frame = frame.copy()
 
-        # Filter and annotate only "person" detections with confidence > threshold_person
+        # Filter and annotate only "person" detections with confidence > THRESHOLD_PERSON
         for cls, conf, box, keypoints, keypoints_conf in zip(results_0.boxes.cls, results_0.boxes.conf, results_0.boxes.xyxy, results_0.keypoints.xy, results_0.keypoints.conf):
             class_name = results_0.names[int(cls)]
-            if class_name == "person" and conf > threshold_person:
+            if class_name == "person" and conf > THRESHOLD_PERSON:
                 # print(f"Detected 'person' with confidence: {conf:.2f}")
                 # Draw the bounding box on the frame
                 x1, y1, x2, y2 = map(int, box)
                 cv2.rectangle(person_annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(person_annotated_frame, f"{class_name} {conf:.2f}", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                # Add background for text
+                text = f"{class_name} {conf:.2f}"
+                font_scale = 2
+                thickness = 5
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
+                text_x, text_y = x1, y1 - 10
+                cv2.rectangle(person_annotated_frame, (text_x, text_y - text_size[1] - 5), 
+                              (text_x + text_size[0] + 5, text_y + 5), (0, 255, 0), -1)
+
+                # Draw the text
+                cv2.putText(person_annotated_frame, text, (text_x, text_y), font, font_scale, (0, 0, 0), thickness)
                 
                 self.draw_stick_model(person_annotated_frame, keypoints, keypoints_conf)
                 
                 # Apply Kalman filter to smooth keypoints
                 # self.linear_kalman_filter(keypoints)
                 # for i, (x, y) in enumerate(keypoints):
-                #     if keypoints_conf[i] > threshold_keypoint:
+                #     if keypoints_conf[i] > THRESHOLD_KEYPOINT:
                 #         cv2.circle(person_annotated_frame, (int(x), int(y)), 5, (0, 200, 100), -1)
                 #         cv2.putText(person_annotated_frame, str(i), (int(x)+5, int(y)+5),
                 #                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 200), 1)
                 #         print(f"Keypoint {i}: ({x:.2f}, {y:.2f}) with confidence {keypoints_conf[i]:.2f}")
 
                 
-
+        self._curent_annotated_frame = person_annotated_frame
         return person_annotated_frame
     
-    def linear_kalman_filter(self, points, dt=1/30):
-        # Define the Kalman filter parameters
-        num_points = points.shape[0]
-        state_size = 4
-        meas_size = 2
-        kf = cv2.KalmanFilter(state_size, meas_size * num_points)
-        kf.measurementMatrix = np.zeros((meas_size * num_points, state_size * num_points), np.float32)
-        for i in range(num_points):
-            kf.measurementMatrix[meas_size*i:meas_size*(i+1), state_size*i:state_size*(i+1)] = np.array([[1, 0, 0, 0],
-                                                                                                        [0, 1, 0, 0]], np.float32)
-        kf.transitionMatrix = np.eye(state_size * num_points)
-        for i in range(num_points):
-            kf.transitionMatrix[state_size*i:state_size*(i+1), state_size*i:state_size*(i+1)] = np.array([[1, 0, dt, 0],
-                                                                                                          [0, 1, 0, dt],
-                                                                                                          [0, 0, 1, 0],
-                                                                                                          [0, 0, 0, 1]], np.float32)
-        kf.processNoiseCov = np.eye(state_size * num_points) * 1e-2
-        kf.measurementNoiseCov = np.eye(meas_size * num_points) * 1e-1
-        kf.errorCovPost = np.eye(state_size * num_points)
-        # Initialize state
-        kf.statePost = np.zeros((state_size * num_points, 1), np.float32)
-        for i in range(num_points):
-            kf.statePost[state_size*i:state_size*(i+1), 0] = np.array([[points[i, 0]],
-                                                                       [points[i, 1]],
-                                                                       [0],
-                                                                       [0]], np.float32)
-        # Predict and correct
-        prediction = kf.predict()
-        measurement = points.flatten().reshape(-1, 1).astype(np.float32)
-        kf.correct(measurement)
-        
+    def linear_kalman_filter(self, point, dt=1/30):
+        # Initialize Kalman filter parameters
+        if not hasattr(self, '_kalman'):
+            self._kalman = cv2.KalmanFilter(4, 2)
+            self._kalman.measurementMatrix = np.array([[1, 0, 0, 0],
+                                   [0, 1, 0, 0]], np.float32)
+            self._kalman.transitionMatrix = np.array([[1, 0, dt, 0],
+                                  [0, 1, 0, dt],
+                                  [0, 0, 1, 0],
+                                  [0, 0, 0, 1]], np.float32)
+            self._kalman.processNoiseCov = np.array([[1, 0, 0, 0],
+                                 [0, 1, 0, 0],
+                                 [0, 0, 1, 0],
+                                 [0, 0, 0, 1]], np.float32) * 0.03
+
+        # Update Kalman filter with the new measurement
+        measurement = np.array([[np.float32(point[0])],
+                     [np.float32(point[1])]])
+        self._kalman.correct(measurement)
+
+        # Predict the next position
+        prediction = self._kalman.predict()
+        return int(prediction[0]), int(prediction[1])
+
     def draw_stick_model(self, person_annotated_frame, keypoints, keypoints_conf):
         # Draw stick figure using keypoints
         for i, (x, y) in enumerate(keypoints):
-            if keypoints_conf[i] > threshold_keypoint:
+            if keypoints_conf[i] > THRESHOLD_KEYPOINT:
+                # Apply Kalman filter to smooth keypoints
+                x_kf, y_kf = self.linear_kalman_filter((x, y))
+                print(f"Original Keypoint x: {x}, y: {y} // Kalman filtered x: {x_kf}, y: {y_kf}")
+                # x, y = x_kf, y_kf
                 cv2.circle(person_annotated_frame, (int(x), int(y)), 5, (0, 0, 255), -1)
         # Define connections (e.g., COCO keypoint pairs)
         connections = [
@@ -99,7 +141,7 @@ class PoseEstimator:
             "legs": (255, 50, 50)  # Blue for legs
         }
         for start, end in connections:
-            if keypoints_conf[start] > threshold_keypoint and keypoints_conf[end] > threshold_keypoint:
+            if keypoints_conf[start] > THRESHOLD_KEYPOINT and keypoints_conf[end] > THRESHOLD_KEYPOINT:
                 if start < len(keypoints) and end < len(keypoints):
                     x1, y1 = keypoints[start]
                     x2, y2 = keypoints[end]
@@ -109,7 +151,11 @@ class PoseEstimator:
                         color = colors["torso"]
                     else:
                         color = colors["legs"]
-                    cv2.line(person_annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 4)
+                    cv2.line(person_annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 8)
+
+    @property
+    def current_frame(self):
+        return self._curent_frame
 
 if __name__ == "__main__":
     pose_estimator = PoseEstimator()
