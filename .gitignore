@@ -10,3 +10,4 @@
 *.zip
 *.tar.gz
 *.pt
+*.DS_Store
